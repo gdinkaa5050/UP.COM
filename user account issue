@@ -1,0 +1,40 @@
+SELECT
+  TO_CHAR(TIMESTAMP,'MM/DD HH24:MI') TIMESTAMP,
+  SUBSTR(OS_USERNAME,1,20) OS_USERNAME,
+  SUBSTR(USERNAME,1,20) USERNAME,
+  SUBSTR(TERMINAL,1,20) TERMINAL,
+  ACTION_NAME,
+  RETURNCODE,
+   OS_USERNAME,
+   USERNAME,
+   USERHOST  
+FROM
+  SYS.DBA_AUDIT_SESSION
+WHERE
+  USERNAME LIKE '%CONW001%'
+  AND TIMESTAMP BETWEEN SYSDATE-1 AND SYSDATE
+ORDER BY
+  TIMESTAMP DESC;
+  
+select username, userhost, timestamp, returncode from dba_audit_trail where username = 'CONW001' and returncode = '1017' order by timestamp desc;  
+  
+  
+  
+SELECT username, account_status,lock_date, PROFILE FROM dba_users WHERE username='CONW001';  
+
+
+--If the RETURNCODE value in the query is 1017, it means an incorrect password entry. Some important RETURNCODE values are as follows.
+
+--RETURNCODE = 0 – Indicates successful login.
+--RETURNCODE = 1017 – Indicates incorrect password entry.
+--RETURNCODE = 28000 – Indicates that the user is locked.
+--RETURNCODE = 28001 – Indicates that the user is expired.
+
+
+select s.sid as "Sid", s.serial# as "Serial#", nvl(s.username, ' ') as "Username", s.machine as "Machine", s.schemaname as "Schema name", s.logon_time as "Login time", s.program as "Program", s.osuser as "Os user", s.status as "Status", nvl(s.process, ' ') as "OS Process id"
+from v$session s
+where nvl(s.username, 'a') not like 'a' and status like 'ACTIVE'
+order by 1,2;
+
+
+
