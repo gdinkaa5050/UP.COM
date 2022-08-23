@@ -1,0 +1,15 @@
+select status,count(*) from v$session group by status;
+
+SELECT sid, serial#, status, username FROM v$session where status='INACTIVE';
+
+
+ALTER SYSTEM KILL SESSION 'sid,serial#' IMMEDIATE;
+--If you have multiple sessions for killing, you must prepare the script.
+
+--Script for all sessions:
+
+SELECT 'ALTER SYSTEM KILL SESSION '''||sid||','||serial#||''' IMMEDIATE;' FROM v$session;
+--The script only for Inactive sessions:
+
+SELECT 'ALTER SYSTEM KILL SESSION '''||sid||','||serial#||''' IMMEDIATE;' FROM v$session 
+where status='INACTIVE';
