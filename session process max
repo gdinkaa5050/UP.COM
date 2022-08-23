@@ -1,0 +1,129 @@
+select name, value
+from v$parameter
+where name in ('sessions','processes','transactions');
+
+select resource_name, current_utilization, max_utilization, limit_value 
+    from v$resource_limit 
+    where resource_name in ('sessions', 'processes');
+    
+select USERNAME,
+OSUSER,MACHINE,PROGRAM,MODULE,status, PREV_EXEC_START
+FROM V$SESSION;
+
+
+select * from v$session;
+
+
+ select count(*),sum(decode(status, 'ACTIVE',1,0)) from v$session where type= 'USER';
+    
+        
+    SELECT
+  'Currently, ' 
+  || (SELECT COUNT(*) FROM V$SESSION)
+  || ' out of ' 
+  || VP.VALUE 
+  || ' connections are used.' AS USAGE_MESSAGE
+FROM 
+  V$PARAMETER VP
+WHERE VP.NAME = 'sessions';
+
+
+
+
+SELECT USERNAME,
+OSUSER,MACHINE,PROGRAM,MODULE,COUNT (*)
+FROM V$SESSION
+GROUP BY USERNAME,OSUSER,MACHINE,PROGRAM,MODULE
+ORDER BY 1,6;
+
+
+
+select s.sid as "Sid", s.serial# as "Serial#", nvl(s.username, ' ') as "Username", s.machine as "Machine", s.schemaname as "Schema name", s.logon_time as "Login time", s.program as "Program", s.osuser as "Os user", s.status as "Status", nvl(s.process, ' ') as "OS Process id"
+from v$session s
+where nvl(s.username, 'a') not like 'a' and status like 'ACTIVE'
+order by 1,2;
+
+
+  
+  
+  select 
+    count(1) "NO. Of DB Users", 
+    to_char(sysdate,'DD-MON-YYYY:HH24:MI:SS') sys_time
+from 
+    v$session 
+where 
+    username is NOT  NULL;
+
+
+
+
+
+
+
+set echo off
+set linesize 95
+set head on
+set feedback on
+col sid head "Sid" form 9999 trunc
+col serial# form 99999 trunc head "Ser#"
+col username form a8 trunc
+col osuser form a7 trunc
+col machine form a20 trunc head "Client|Machine"
+col program form a15 trunc head "Client|Program"
+col login form a11
+col "last call" form 9999999 trunc head "Last Call|In Secs"
+col status form a6 trunc
+select sid,serial#,substr(username,1,10) username,substr(osuser,1,10) osuser,
+substr(program||module,1,15) program,substr(machine,1,22) machine,
+to_char(logon_time,'ddMon hh24:mi') login,
+last_call_et "last call",status
+from v$session where status='ACTIVE'
+order by 1
+/
+
+
+
+
+
+
+
+
+
+
+
+
+SELECT a.username, a.osuser, a.program, b.spid,b.pga_used_mem, a.sid, a.serial# ,a.module,a.logon_time,a.terminal FROM v$session a, v$process b WHERE a.paddr = b.addr
+order by
+b.pga_used_mem desc;
+
+
+
+
+
+
+
+SELECT PROCESS pid, sess.process, sess.status, sess.username, sess.schemaname, sql.sql_text FROM v$session sess, v$sql sql WHERE sql.sql_id(+) = sess.sql_id AND sess.type = 'USER';
+
+
+SET LINESIZE 100
+col sid format 999999
+col username format a20
+col osuser format a15
+SELECT b.spid,a.sid, a.serial#,a.username, a.osuser
+FROM v$session a, v$process b
+WHERE a.paddr= b.addr
+AND b.spid='&spid'
+ORDER BY b.spid;
+
+--For making sure you are targeting the correct session, you might want to review the SQL associated with the offensive task, to view the SQL being executed by the session you can use the following SQL statement:
+
+SELECT
+b.username, a.sql_text
+FROM
+v$sqltext_with_newlines a, v$session b, v$process c
+WHERE
+c.spid = ‘&spid’
+AND
+c.addr = b.paddr
+AND
+b.sql_address = a.address;
