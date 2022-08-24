@@ -1,0 +1,460 @@
+This document is intended for DBA use only to repair any issues that pop up during 19c upgrades.
+
+Invalid SYS objects
+(objerror$)
+
+ORA-04045: errors during recompilation/revalidation of PUBLIC.DBA_TAB_COLS ORA-0
+
+0600: internal error code, arguments: [kqd-objerror$], [U], [0], [0], [DBA_TAB_C OLUMNS], [], [], [],
+
+ORA-04045: errors during recompilation/revalidation of SYS.DBA_TAB_COLS_V$
+
+ORA-00600: internal error code, arguments: [kqd-objerror$], [U], [0], [0], [DBA_TAB_COLS], [], [], [], []
+
+ORA-04045: errors during recompilation/revalidation of SYS._CURRENT_EDITION_OBJ
+
+NOTE: This error may present as any number of different SYS-owned views reporting invalid. Running UTLRP does not fix it and will probably throw a bunch more errors. The root problem is having objects missing from sys.objerror$. This can be proven with a simple query:
+select obj# from obj$ where bitand(flags,32768) = 32768 and obj# not in (select obj# from objerror$);
+
+If the above query returns any records, run the fix actions.
+************************************************************
+Caution: This is NOT a supported solution.
+
+1) It is recommended to take a full backup or enable flashback in case it is needed to restore the database to a point in time before modifying the data dictionary.
+
+2) SHUTDOWN IMMEDIATE and STARTUP UPGRADE
+
+3) Insert the missing rows into OBJERROR$:
+
+insert into objerror$ select obj# from obj$ where bitand(flags,32768) = 32768 and obj# not in (select obj# from objerror$);
+
+4) COMMIT;
+
+5) SHUTDOWN ABORT -- It must be shutdown abort
+
+6) STARTUP UPGRADE
+
+7) Rebuild the catalog and compile:
+
+@$ORACLE_HOME/rdbms/admin/catalog.sql
+
+@$ORACLE_HOME/rdbms/admin/catproc.sql
+
+@$ORACLE_HOME/rdbms/admin/utlrp.sql
+
+8) SHUTDOWN IMMEDIATE and STARTUP
+
+9) Verify that SYS objects are no longer invalid:
+
+select * from dba_registry; -- This is just a sample query that would have failed previously
+#############################################################################################################
+incident and trace directories filling	
+
+NOTE: We decided to backout the patch that allowed the problem to be solved so we did not have to apply the patch throughout the enterprise.
+
+ORA-00600: internal error code, arguments: [ktspgsb-inc], [22], [21]
+See "SR 3-28426308241 : ORA 600 ktspgsb-inc Auto-Flush Slave Action Errors" for details.
+
+mmon slave processes were failing during auto flush and generating thousands of trace files and incident directories and files.
+*********************************************************************************************************************************
+
+
+Solution is in the SR.  Here are the high level step.
+
+Apply and backoff Patch p28788272_199000DBRU_Linux-x86-64.zip .  Staged in G:\DBA\OracleTpm\19c-19.9
+
+Follow the instructions in the README.txt, stopping all databases that use the patched home as described in the README.txt.
+Apply the patch.
+Following the instruction in the MOS doc "Note 782974.1 - How to Recreate the Automatic Workload Repository (AWR)?"
+Follow the instructions in the README.txt, stopping all databases that use the patched home as described in the README.txt.
+Rollback the patch.
+###########################################################################################
+Auto statistics is not working.	
+
+Under investigation.
+I think the following steps fixed the issue on dev254.  Got to try on a few more databases to make sure.
+
+
+Troubleshooting Scheduler Autotask Issues (Doc ID 1561498.1)
+
+MOS docs of interest
+Bug 29349874 - auto task job not getting mapped to ora$autotask consumer group (Doc ID 29349874.8)  which states
+The fix for 29349874 is first included 20.1.0
+
+DBA_AUTOTASK_CLIENT_JOB And DBA_AUTOTASK_TASK Are Empty (Doc ID 2097721.1)
+
+Gathering Statistics Job Doesn't Work (Doc ID 1945512.1)
+
+I tried the solution in the following.  They had no impact.
+Automatic Maintenance Jobs Not Run Even When "auto optimizer stats collection" Is Enabled (Doc ID 2362007.1)
+Automatic Optimizer Statistics Collection not Running Even Though "auto optimizer stats collection" is Enabled (Doc ID 1968577.1)
+#################################################################################################################
+
+
+Queries cause ORA-600	
+
+[Error] Execution (20: 15): ORA-00600: internal error code, arguments: [qksvcGetGuardCol:2], [233467], [0], [], [], [], [], [], [], [], [], []
+
+Error is thrown any time an affected table is queried such as:
+select * from AFI_DNLD_SP_RE_LO;
+
+The columns affected by this bug can be identified with this query:
+
+select a.obj#,u.name owner, c.name table_name,a.intcol#,a.name column_name, c.mtime last_ddl
+from sys.col$ a, sys.ecol$ b, sys.obj$ c, sys.user$ u
+where a.obj#=b.tabobj#
+and a.intcol#=b.colnum
+and a.obj#=c.obj#
+and c.owner# = u.user#
+and a.property=1073741824
+and a.null$=0
+and b.guard_id is null
+order by 2,3,5;
+
+All of the affected columns have a default value and a NOT NULL NOVALIDATE constraint.
+*************************************************************************************************
+Oracle support couldn't figure it out, but this is a usable workaround:
+
+SQL> alter table IDBA999.AFI_DNLD_JT_FAC_CONT modify CONT_INAC_FLAG null;
+Table altered.
+SQL> alter table IDBA999.AFI_DNLD_JT_FAC_CONT modify CONT_INAC_FLAG not null;
+
+Table altered.
+SQL> select CONT_INAC_FLAG from IDBA999.AFI_DNLD_JT_FAC_CONT
+2 fetch next 2 rows only;
+
+
+
+C
+-
+N
+N
+
+(Previously, this query would return ORA-600).
+####################################################################################################################
+Bad OBJ$ entry with TYPE#=0 (Doc ID 1361015.1)	
+The pre-upgrade script runs hcheck.sql and returns a failure like:
+.- ObjType0 ... 1102000400 <= *All Rel* 02/18 09:42:56 FAIL
+
+HCKE-0036: Bad OBJ$ entry with TYPE#=0 (Doc ID 1361015.1)
+OBJ$ OBJ#=828743 TYPE#=0 NAME=PNO_PERS NAMESPACE=66 Dblink=DEV071.UPRR.COM
+OBJ$ OBJ#=828725 TYPE#=0 NAME=TRAIN NAMESPACE=66 Dblink=XTST093.UPRR.COM
+OBJ$ OBJ#=828746 TYPE#=0 NAME=TRAIN_HISTORY NAMESPACE=66 Dblink=XTST093.UPRR.COM
+OBJ$ OBJ#=828724 TYPE#=0 NAME=TRAIN_SCHEDULE NAMESPACE=66
+Dblink=XTST093.UPRR.COM
+*******************************************************************************
+
+
+Oracle Support offered this solution:
+
+1) -. Run hcheck.sql first.
+
+SQL> SELECT owner#, name, obj#, dataobj#, namespace,remoteowner, linkname, subname from obj$ where NAMESPACE=66 and type#=0;
+
+If the same objects are listed as per hcheck.log then continue.
+
+2) perform a full backup of the database. Do not go further without a full backup.
+
+3) Run the following SQL commands:
+SQL> shutdown immediate
+
+startup restrict
+commit;
+set transaction use rollback segment system;
+
+delete from obj$ where NAMESPACE=66 and type#=0;
+
+-- it should delete same number of rows as per steps #1.
+
+commit;
+shutdown ABORT;
+startup
+
+4) run hcheck again
+############################################################################
+Invalid JServer Java	
+
+select comp_name, version, status from dba_registry;
+
+JServer JAVA Virtual Machine 11.2.0.4.0 INVALID
+
+
+
+This also shows up in the output from the "1" script as:
+
+1. javavm_status NO Manual fixup required.
+********************************************************************
+
+
+It is best to run this between scripts 3 and 4 on the target server when doing a Data Guard upgrade. If you already ran script 4 and it failed, manually rollback the upgrade on the target db using procedures below
+
+shutdown immediate;
+startup mount;
+flashback database to restore point PRE_UPGRADE;
+alter database open resetlogs;
+drop restore point PRE_UPGRADE;
+
+########Continue by issuing the below commands on the target server
+
+/*
+
+JSserver Java Virtual Machine is INVALID and Unable to Compile SYS.DBMS_JAVA with PLS-201 errors (Doc ID 2126103.1)
+
+*/
+
+select owner, object_name, object_type, status
+from dba_objects
+where object_name like 'DBMS_JAVA%'
+or object_name like '%INITJVMAUX%'
+order by owner, object_name, object_type;
+
+
+
+-- 1. Set the following init parameters so that JIT and job process do not start as well as any system triggers that might lock objects being patched.
+
+alter system set java_jit_enabled = FALSE;
+
+alter system set "_system_trig_enabled"=FALSE;
+
+alter system set JOB_QUEUE_PROCESSES=0;
+
+
+
+-- 2. Startup instance in restricted mode.
+
+shutdown immediate
+
+startup restrict
+
+
+
+-- 3.Run the postinstallation steps of OJVM PSU(Step 3.3.2 from readme) Bug 29610422 - Oracle JavaVM Component 11.2.0.4.190716 Database PSU (Jul 2019) (OJVM PSU) (Doc ID 29610422.8)
+
+@/software/oracle/ora-11.02.00.04.1907/sqlpatch/29610422/postinstall.sql
+
+
+
+--4. Reset modified init parameters
+
+alter system set java_jit_enabled = true;
+
+alter system set "_system_trig_enabled"=TRUE;
+
+alter system set JOB_QUEUE_PROCESSES=10;
+
+
+
+-- 5.Restart instance as normal
+
+shutdown
+
+startup
+
+-- 6. Resume log apply
+
+select state from v$logstdby_state; (Should show SQL APPLY NOT ON)
+
+ALTER DATABASE START LOGICAL STANDBY APPLY IMMEDIATE;
+######################################################################################################
+Spatial Indexes throw errors	
+
+Users were unable to query columns with a spatial index on them. Error was:
+
+ORA-13234: Failed to access R-tree-index table [MDRT Table]
+
+
+Trying to drop and recreate the spatial index throws the error:
+ORA-29855: error occurred in the execution of ODCIINDEXCREATE routine
+ORA-13249: internal error in Spatial index: [mdidxrbd]
+ORA-13249: Error in Spatial index: index build failed
+ORA-13249: Error in R-tree: [mdrcrtscrt]
+ORA-13231: failed to create index table [MDRT_15153E$] during R-tree creation
+ORA-13249: Stmt-Execute Failure: CREATE TABLE "IDBA999"."MDRT_15153E$"(NODE_ID NUMBER,NODE_LEVEL NUMBER,INFO BLOB) LOB (INFO) STORE AS SECUREFILE (NOCACHE NOLOGGING) PCTFREE 2 TABLESPACE EFMXS201 NOLOGGING
+ORA-29400: data cartridge error
+ORA-01031: insufficient privileges
+ORA-06512: at "MDSYS.SDO_INDEX_METHOD_10I", line 10
+**********************************************************************************
+Explicit "create table" and "create sequence" grants are required to the schema owner. The APPL_OWNER role privs aren't enough.
+
+
+
+grant create table to idba999;
+grant create sequence to idba999;
+
+
+
+Index rebuild was then successful:
+
+DROP INDEX IDBA999.EFM_GPS_LOCA_N1;
+
+CREATE INDEX IDBA999.EFM_GPS_LOCA_N1 ON IDBA999.EFM_GPS_LOCA
+(CL_GEOM_DATA)
+INDEXTYPE IS MDSYS.SPATIAL_INDEX
+PARAMETERS('TABLESPACE=EFMXS201');
+################################################################################################
+sql Apply process fails after upgrading logical standby database	
+
+The upgrade succeeds, but then the SQL Apply process stops with errors in a trace file like:
+table SYS.FGA_LOG$ has 29 columns on the primary and 31 on the replicant
+
+The most obvious indication that this happened is while running script "4", the test for SQL Apply appears to be in an endless loop displaying:
+
+Started SELECT_FROM_TGT select state from v\$logstdby_state;
+SQL APPLY NOT ON
+
+This is caused by the upgrade process adding 2 new columns to the FGA_LOG$ table and 
+the source database has active fine grained auditing trying to send over audit records.
+*************************************************************************************************
+Open a second command window and connected to the target server. In the target database, log in as SYS and run these commands:
+
+SQL> exec DBMS_LOGSTDBY.SKIP('DML', 'SYS', 'FGA_LOG$', NULL);
+
+SQL> ALTER DATABASE START LOGICAL STANDBY APPLY;
+
+You will have several minutes to accomplish this before the "4" script times out and fails. 
+If you get the fix done before the script fails, it will simply resume running.
+#################################################################################################
+
+
+Dependency$ p_timestamp mismatch for VALID objects
+
+Pre-upgrade has warnings for :
+
+HCKW-0016: Dependency$ p_timestamp mismatch for VALID objects (Doc ID 1361045.1)
+
+select
+do.obj# d_obj,do.name d_name, do.type# d_type,
+po.obj# p_obj,po.name p_name,
+to_char(p_timestamp,'DD-MON-YYYY HH24:MI:SS') "P_Timestamp",
+to_char(po.stime ,'DD-MON-YYYY HH24:MI:SS') "STIME",
+decode(sign(po.stime-p_timestamp),0,'SAME','*DIFFER*') X
+from sys.obj$ do, sys.dependency$ d, sys.obj$ po
+where P_OBJ#=po.obj#(+)
+and D_OBJ#=do.obj#
+and do.status=1 /*dependent is valid*/
+and po.status=1 /*parent is valid*/
+and po.stime!=p_timestamp /*parent timestamp not match*/
+order by 2,1;
+
+If the d_type is reported as 5: See fix to right →
+
+If the d_type = 46:  exec dbms_ruleadm_internal.validate_re_object('<OBJECT_NAME>',23);
+*************************************************************************************************
+
+Compile the synonyms using the following script
+
+ 
+set pagesize 10000
+set trimspool on
+set head off
+set echo off
+spool /tmp/compiling.lst
+
+select 'alter public synonym "'||do.name||'" compile;'
+FROM sys.obj$ do, sys.dependency$ d, sys.obj$ po
+WHERE P_OBJ#=po.obj#(+)
+AND D_OBJ#=do.obj#
+AND do.status=1 /*dependent is valid*/
+AND po.status=1 /*parent is valid*/
+AND po.stime!=p_timestamp /*parent timestamp not match*/;
+
+ Spool off
+
+
+Now run this spooled file :
+
+SQL>@/tmp/compiling.lst
+##############################################################
+
+pending_dst_session  Manual fixup required.	
+
+The Pre upgrade script checks report: 1. pending_dst_session NO Manual fixup required.
+
+This is caused by a DST upgrade being incomplete.
+
+SQL> SELECT PROPERTY_NAME, SUBSTR(property_value, 1, 30) value
+FROM DATABASE_PROPERTIES
+WHERE PROPERTY_NAME LIKE 'DST_%'
+ORDER BY PROPERTY_NAME; 2 3 4
+
+PROPERTY_NAME VALUE
+------------------------------ ------------------------------
+DST_PRIMARY_TT_VERSION 14
+DST_SECONDARY_TT_VERSION 4
+DST_UPGRADE_STATE UPGRADE
+************************************************************
+Oracle Support published this fix:
+
+CONN / as sysdba
+alter session set "_with_subquery"=materialize;
+alter session set "_simple_view_merging"=TRUE;
+set serveroutput on
+VAR numfail number
+BEGIN
+DBMS_DST.UPGRADE_DATABASE(:numfail,
+parallel => TRUE,
+log_errors => TRUE,
+log_errors_table => 'SYS.DST$ERROR_TABLE',
+log_triggers_table => 'SYS.DST$TRIGGER_TABLE',
+error_on_overlap_time => FALSE,
+error_on_nonexisting_time => FALSE);
+DBMS_OUTPUT.PUT_LINE('Failures:'|| :numfail);
+END;
+/
+
+VAR fail number
+BEGIN
+DBMS_DST.END_UPGRADE(:fail);
+DBMS_OUTPUT.PUT_LINE('Failures:'|| :fail);
+END;
+/
+
+SELECT PROPERTY_NAME, SUBSTR(property_value, 1, 30) value
+FROM DATABASE_PROPERTIES
+WHERE PROPERTY_NAME LIKE 'DST_%'
+ORDER BY PROPERTY_NAME;
+############################################################
+
+HCKE-0023: Orphaned SEG$ Entry (Doc ID 1360934.1)	
+
+HCKE-0023: Orphaned SEG$ Entry (Doc ID 1360934.1)
+ORPHAN SEG$: SegType=TYPE2 UNDO TS=1 RFILE/BLOCK=2/113
+ORPHAN SEG$: SegType=TYPE2 UNDO TS=1 RFILE/BLOCK=2/97
+ORPHAN SEG$: SegType=TYPE2 UNDO TS=1 RFILE/BLOCK=2/913
+ORPHAN SEG$: SegType=TYPE2 UNDO TS=1 RFILE/BLOCK=2/969
+ORPHAN SEG$: SegType=TYPE2 UNDO TS=1 RFILE/BLOCK=2/1177	
+********************************************************************************************************
+NOTE: This is only for the UNDO tablespace.  The example given below is for xtst057, change before using.  
+Since a new UNDO can be created without reboot the system and no data loss.  
+
+
+show parameter undo_tablespace
+NAME TYPE VALUE
+------------------------------------ ----------- ------------------------------
+undo_tablespace string UNDTS001
+
+-- Get the size of the UNDTS001 and make sure enought free disk space is available before running the next command
+CREATE UNDO TABLESPACE UNDTS002
+DATAFILE
+'/oradata/xtst057/db001/undts002_xtst057_001.dbf' SIZE 8G AUTOEXTEND OFF
+ONLINE
+RETENTION NOGUARANTEE
+BLOCKSIZE 8K
+FLASHBACK ON;
+
+alter system set undo_tablespace = UNDTS002 scope=both;
+
+show parameter undo_tablespace
+NAME TYPE VALUE
+------------------------------------ ----------- ------------------------------
+undo_tablespace string UNDTS002
+
+-- I ran the following to clear the old undo segments. If you wait the
+shutdown immediate
+startup
+show parameter undo_tablespace
+NAME TYPE VALUE
+------------------------------------ ----------- ------------------------------
+undo_tablespace string UNDTS002
+
+DROP TABLESPACE UNDTS001 INCLUDING CONTENTS AND DATAFILES;
