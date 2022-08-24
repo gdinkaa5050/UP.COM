@@ -1,0 +1,41 @@
+Patching 19c Oracle Home
+All Oracle 19.9 homes must be patched with bug patch 32010707 and bug patch 33541736. This both patches are installed with the procedure below.
+
+ssh as oracle to TPM server
+Changed directory to /upapps/dte/oracle-19c/patch/stand-alone/ora-19.09.00.00.2010
+Run ./patch_database.sh <tgthost>, 
+Check script logs
+Note: The 1_pre_upgrade.sh scripts executes patch_database.sh for all dev and test database; for prod databases it prompts to run the patch_database.sh.
+
+In-place upgrade
+The SAN team will mount the 19.9 Oracle home
+
+The DBA team will perform the following:
+
+Update PRD_MIGR_19C table on prod138 
+Run the following scripts on the TPM server from /software/oracle/tmp/terry/my-tpm/db-migrate-and-upgrade/11g_19c_noncdb. Check logs for errors before proceeding.
+1_pre_upgrade.sh
+
+4_upgrade_target.sh 
+
+6_finish_upgrade.sh
+
+All scripts need the source SID as their only parm. 
+
+Data guard migrate and upgrade
+The DBA team will perform the following:
+
+Create SCP for dev/test/prod databases.  Typically all the databases supporting a TLA are included in the SCP.  Update the SCP_NBR column PRD_MIGR_19C table on prod138. 
+Update TGT_HOST column of PRD_MIGR_19C table.
+Run the following on the TPM server from /software/oracle/tmp/terry/my-tpm/db-migrate-and-upgrade/11g_19c_noncdb. Check logs for errors before proceeding.
+1_pre_upgrade.sh
+
+2_instantiate_standby.sh
+
+3_convert_physical_to_logical.sh
+
+4_upgrade_target.sh 
+
+5_flip_to_standby.sh
+
+6_finish_upgrade.sh
